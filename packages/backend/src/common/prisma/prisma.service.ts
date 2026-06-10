@@ -4,7 +4,7 @@ import {
   OnModuleDestroy,
   OnModuleInit,
 } from '@nestjs/common';
-import { PrismaClient } from '@prisma/client';
+import { Prisma, PrismaClient } from '@prisma/client';
 import { TenantContext } from '../context/tenant-context';
 
 /**
@@ -56,15 +56,17 @@ export class PrismaService
         $allOperations: async ({ args, query }) => {
           const orgId = TenantContext.orgId();
           if (!orgId) return query(args);
-          // SET LOCAL keeps the GUC scoped to this transaction only, so the
-          // RLS policy (organization_id = current_setting('app.current_org'))
-          // applies to the wrapped operation and never leaks across requests.
-          return this.$transaction(async (tx) => {
-            await tx.$executeRawUnsafe(
-              `SET LOCAL "app.current_org" = '${orgId.replace(/'/g, "''")}'`,
-            );
-            return query(args);
-          });
+          // Batch transaction pins BOTH statements to one connection, so the
+          // transaction-scoped GUC from set_config(..., true) applies to the
+          // wrapped operation and resets on commit. An interactive
+          // $transaction(cb) must NOT be used here: query(args) inside the
+          // callback executes outside the tx connection (Prisma limitation).
+          // This mirrors Prisma's documented row-level-security pattern.
+          const [, result] = await this.$transaction([
+            this.$executeRaw`SELECT set_config('app.current_org', ${orgId}, true)`,
+            query(args) as unknown as Prisma.PrismaPromise<unknown>,
+          ]);
+          return result;
         },
       },
     });

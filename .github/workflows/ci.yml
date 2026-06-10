@@ -40,7 +40,7 @@ jobs:
         with:
           node-version: 20
           cache: npm
-      - run: npm install --no-audit --no-fund
+      - run: npm ci
       - name: Generate Prisma client
         run: npm run prisma:generate --workspace @rayverify/backend
       - name: Lint
@@ -69,6 +69,6 @@ jobs:
         with:
           node-version: 20
           cache: npm
-      - run: npm install --no-audit --no-fund
+      - run: npm ci
       - run: npm run typecheck --workspace @rayverify/frontend
       - run: npm run build --workspace @rayverify/frontend

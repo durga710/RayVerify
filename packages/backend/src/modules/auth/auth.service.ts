@@ -35,7 +35,9 @@ export class AuthService {
     });
     if (!org || !org.isActive) throw new UnauthorizedException('Invalid credentials');
 
-    const user = await TenantContext.run({ organizationId: org.id }, () =>
+    // Await INSIDE the run() scope: Prisma promises are lazy, and the RLS
+    // extension reads the tenant from AsyncLocalStorage at execution time.
+    const user = await TenantContext.run({ organizationId: org.id }, async () =>
       this.prisma.forRequest().user.findUnique({
         where: { organizationId_email: { organizationId: org.id, email: dto.email } },
         include: { userRoles: { include: { role: { include: { rolePermissions: { include: { permission: true } } } } } } },
@@ -139,7 +141,7 @@ export class AuthService {
   private async registerFailure(orgId: string, userId: string, failed: number): Promise<void> {
     const next = failed + 1;
     const lock = next >= 5 ? new Date(Date.now() + 15 * 60_000) : null;
-    await TenantContext.run({ organizationId: orgId }, () =>
+    await TenantContext.run({ organizationId: orgId }, async () =>
       this.prisma.forRequest().user.update({
         where: { id: userId },
         data: { failedLogins: next, lockedUntil: lock },
@@ -148,7 +150,7 @@ export class AuthService {
   }
 
   private async recordLogin(orgId: string, userId: string): Promise<void> {
-    await TenantContext.run({ organizationId: orgId }, () =>
+    await TenantContext.run({ organizationId: orgId }, async () =>
       this.prisma.forRequest().user.update({
         where: { id: userId },
         data: { failedLogins: 0, lockedUntil: null, lastLoginAt: new Date() },
