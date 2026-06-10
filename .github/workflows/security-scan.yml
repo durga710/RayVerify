@@ -8,22 +8,38 @@ on:
   schedule:
     - cron: '0 6 * * *' # daily
 
+permissions:
+  contents: read
+  security-events: write
+
 jobs:
   secrets:
     name: Secret scan (gitleaks)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-        with: { fetch-depth: 0 }
-      - uses: gitleaks/gitleaks-action@v2
+      - uses: actions/checkout@v6
+      - name: Install gitleaks
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_VERSION: 8.30.1
+        run: |
+          curl -sSfL "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" -o gitleaks.tar.gz
+          tar -xzf gitleaks.tar.gz gitleaks
+          chmod +x gitleaks
+      - name: Run gitleaks
+        run: ./gitleaks dir . --redact --verbose --exit-code 1 --report-format sarif --report-path gitleaks-results.sarif
+      - name: Upload gitleaks SARIF artifact
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gitleaks-results.sarif
+          path: gitleaks-results.sarif
+          if-no-files-found: ignore
 
   dependencies:
     name: Dependency audit
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: actions/setup-node@v4
         with: { node-version: 20, cache: npm }
       - run: npm ci
@@ -34,9 +50,9 @@ jobs:
     name: Filesystem vuln scan (Trivy)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Trivy filesystem scan
-        uses: aquasecurity/trivy-action@0.24.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           scan-type: fs
           scan-ref: .

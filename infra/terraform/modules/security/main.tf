@@ -128,12 +128,17 @@ resource "aws_secretsmanager_secret" "rds" {
   }
 }
 
+resource "random_password" "rds_initial_password" {
+  length  = 32
+  special = false
+}
+
 resource "aws_secretsmanager_secret_version" "rds" {
   secret_id = aws_secretsmanager_secret.rds.id
-  # Placeholder — real value injected by DB module or first-time rotate operation.
+  # Initial value is generated, then rotated outside Terraform.
   secret_string = jsonencode({
     username = "rayverify_admin"
-    password = "ROTATE_IMMEDIATELY"
+    password = random_password.rds_initial_password.result
     engine   = "postgres"
     port     = 5432
     dbname   = "rayverify"
@@ -156,10 +161,15 @@ resource "aws_secretsmanager_secret" "redis" {
   }
 }
 
+resource "random_password" "redis_initial_auth_token" {
+  length  = 64
+  special = false
+}
+
 resource "aws_secretsmanager_secret_version" "redis" {
   secret_id = aws_secretsmanager_secret.redis.id
   secret_string = jsonencode({
-    auth_token = "ROTATE_IMMEDIATELY"
+    auth_token = random_password.redis_initial_auth_token.result
   })
 
   lifecycle {
@@ -178,12 +188,27 @@ resource "aws_secretsmanager_secret" "app" {
   }
 }
 
+resource "random_password" "app_initial_jwt_secret" {
+  length  = 64
+  special = false
+}
+
+resource "random_password" "app_initial_jwt_refresh_secret" {
+  length  = 64
+  special = false
+}
+
+resource "random_password" "app_initial_encryption_key" {
+  length  = 64
+  special = false
+}
+
 resource "aws_secretsmanager_secret_version" "app" {
   secret_id = aws_secretsmanager_secret.app.id
   secret_string = jsonencode({
-    jwt_secret           = "ROTATE_IMMEDIATELY"
-    jwt_refresh_secret   = "ROTATE_IMMEDIATELY"
-    encryption_key       = "ROTATE_IMMEDIATELY"
+    jwt_secret           = random_password.app_initial_jwt_secret.result
+    jwt_refresh_secret   = random_password.app_initial_jwt_refresh_secret.result
+    encryption_key       = random_password.app_initial_encryption_key.result
     mfa_issuer           = "RayVerify"
   })
 
