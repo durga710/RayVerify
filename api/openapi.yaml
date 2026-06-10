@@ -1,0 +1,750 @@
+openapi: 3.1.0
+info:
+  title: RayVerify™ API
+  version: 0.1.0
+  description: >
+    Government-grade fraud detection & identity verification for Medicaid / HCBS.
+    Every endpoint is tenant-scoped (Postgres RLS) and audited. Authentication is
+    JWT bearer (access + rotating refresh). This document is the contract; the
+    live, generated spec is served by the backend at `/{prefix}/docs-json`.
+  license:
+    name: UNLICENSED
+servers:
+  - url: https://api.rayverify.example/api/v1
+    description: Production (illustrative)
+  - url: http://localhost:4000/api/v1
+    description: Local development
+
+security:
+  - bearerAuth: []
+
+tags:
+  - name: auth
+  - name: identity
+  - name: visits
+  - name: fraud
+  - name: cases
+  - name: providers
+  - name: audit
+  - name: reports
+  - name: notifications
+  - name: hardware
+  - name: health
+
+paths:
+  /health:
+    get:
+      tags: [health]
+      summary: Liveness probe
+      security: []
+      responses:
+        '200':
+          description: OK
+
+  /auth/login:
+    post:
+      tags: [auth]
+      summary: Authenticate (org slug + email + password [+ MFA])
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/LoginRequest' }
+      responses:
+        '200':
+          description: Token pair
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TokenResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /auth/refresh:
+    post:
+      tags: [auth]
+      summary: Rotate tokens
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RefreshRequest' }
+      responses:
+        '200':
+          description: New token pair
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TokenResponse' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /auth/logout:
+    post:
+      tags: [auth]
+      summary: Revoke a refresh token
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RefreshRequest' }
+      responses:
+        '204': { description: Revoked }
+
+  /auth/me:
+    get:
+      tags: [auth]
+      summary: Current authenticated principal
+      responses:
+        '200':
+          description: Principal
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Principal' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /identity/verify:
+    post:
+      tags: [identity]
+      summary: Run selfie + liveness identity verification
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/VerifyIdentityRequest' }
+      responses:
+        '201':
+          description: Verification outcome
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/IdentityVerificationOutcome' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /visits:
+    get:
+      tags: [visits]
+      summary: List visits
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+        - name: status
+          in: query
+          schema: { $ref: '#/components/schemas/VisitStatus' }
+      responses:
+        '200':
+          description: Paginated visits
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PaginatedVisits' }
+    post:
+      tags: [visits]
+      summary: Schedule/create a visit
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateVisitRequest' }
+      responses:
+        '201':
+          description: Created visit
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Visit' }
+
+  /visits/{id}:
+    get:
+      tags: [visits]
+      summary: Get a visit with its full verification package
+      parameters: [{ $ref: '#/components/parameters/Id' }]
+      responses:
+        '200':
+          description: Visit with verification package
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/VisitDetail' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /visits/{id}/clock-in:
+    post:
+      tags: [visits]
+      summary: Record clock-in (GPS + device evidence)
+      parameters: [{ $ref: '#/components/parameters/Id' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ClockEvent' }
+      responses:
+        '201': { description: Updated visit }
+
+  /visits/{id}/clock-out:
+    post:
+      tags: [visits]
+      summary: Record clock-out
+      parameters: [{ $ref: '#/components/parameters/Id' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ClockOutEvent' }
+      responses:
+        '201': { description: Updated visit }
+
+  /visits/{id}/verify:
+    post:
+      tags: [visits]
+      summary: Run the verification chain and produce the rollup
+      parameters: [{ $ref: '#/components/parameters/Id' }]
+      responses:
+        '201':
+          description: Verification rollup
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/VerificationRollup' }
+
+  /fraud/events:
+    get:
+      tags: [fraud]
+      summary: List fraud events
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+        - name: type
+          in: query
+          schema: { $ref: '#/components/schemas/FraudEventType' }
+      responses:
+        '200':
+          description: Paginated fraud events
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PaginatedFraudEvents' }
+
+  /fraud/visits/{id}/score:
+    post:
+      tags: [fraud]
+      summary: Score a visit (run detectors, persist events + score)
+      parameters: [{ $ref: '#/components/parameters/Id' }]
+      responses:
+        '201':
+          description: Scoring outcome
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ScoringOutcome' }
+
+  /cases:
+    get:
+      tags: [cases]
+      summary: List cases (priority-ordered)
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+        - name: status
+          in: query
+          schema: { $ref: '#/components/schemas/CaseStatus' }
+      responses:
+        '200': { description: Paginated cases }
+    post:
+      tags: [cases]
+      summary: Open an investigation case
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateCaseRequest' }
+      responses:
+        '201':
+          description: Created case
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Case' }
+
+  /cases/{id}:
+    get:
+      tags: [cases]
+      summary: Case detail (events, notes, evidence)
+      parameters: [{ $ref: '#/components/parameters/Id' }]
+      responses:
+        '200':
+          description: Case detail
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CaseDetail' }
+
+  /cases/{id}/assign:
+    patch:
+      tags: [cases]
+      summary: Assign a case to an investigator
+      parameters: [{ $ref: '#/components/parameters/Id' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [assigneeId]
+              properties:
+                assigneeId: { type: string, format: uuid }
+      responses:
+        '200': { description: Updated case }
+
+  /cases/{id}/status:
+    patch:
+      tags: [cases]
+      summary: Update case status
+      parameters: [{ $ref: '#/components/parameters/Id' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [status]
+              properties:
+                status: { $ref: '#/components/schemas/CaseStatus' }
+      responses:
+        '200': { description: Updated case }
+
+  /cases/{id}/notes:
+    post:
+      tags: [cases]
+      summary: Add an investigator note
+      parameters: [{ $ref: '#/components/parameters/Id' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [body]
+              properties:
+                body: { type: string }
+                isInternal: { type: boolean, default: true }
+      responses:
+        '201': { description: Created note }
+
+  /providers/risk-ranking:
+    get:
+      tags: [providers]
+      summary: Provider risk ranking (highest risk first)
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+      responses:
+        '200': { description: Paginated risk profiles }
+
+  /providers/{id}/risk-profile:
+    get:
+      tags: [providers]
+      summary: Provider risk profile with historical trend
+      parameters: [{ $ref: '#/components/parameters/Id' }]
+      responses:
+        '200':
+          description: Risk profile
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ProviderRiskProfile' }
+
+  /providers/{id}/risk-profile/recompute:
+    post:
+      tags: [providers]
+      summary: Recompute a provider risk profile
+      parameters: [{ $ref: '#/components/parameters/Id' }]
+      responses:
+        '201':
+          description: Updated profile
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ProviderRiskProfile' }
+
+  /audit/logs:
+    get:
+      tags: [audit]
+      summary: Search the immutable audit trail
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+        - { name: resourceType, in: query, schema: { type: string } }
+        - { name: resourceId, in: query, schema: { type: string } }
+        - { name: action, in: query, schema: { $ref: '#/components/schemas/AuditAction' } }
+      responses:
+        '200': { description: Paginated audit logs }
+
+  /audit/verify-chain:
+    get:
+      tags: [audit]
+      summary: Verify the tamper-evident audit hash chain
+      responses:
+        '200':
+          description: Chain verification result
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  valid: { type: boolean }
+                  checked: { type: integer }
+                  brokenAtId: { type: string, format: uuid, nullable: true }
+
+  /reports:
+    get:
+      tags: [reports]
+      summary: List reports
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+        - name: type
+          in: query
+          schema: { $ref: '#/components/schemas/ReportType' }
+      responses:
+        '200': { description: Paginated reports }
+    post:
+      tags: [reports]
+      summary: Queue a report for generation
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RequestReport' }
+      responses:
+        '201': { description: Queued report }
+
+  /reports/{id}:
+    get:
+      tags: [reports]
+      summary: Get a report (status + download when READY)
+      parameters: [{ $ref: '#/components/parameters/Id' }]
+      responses:
+        '200': { description: Report }
+
+  /notifications:
+    get:
+      tags: [notifications]
+      summary: List the current user's notifications
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+      responses:
+        '200': { description: Paginated notifications }
+
+  /notifications/{id}/read:
+    patch:
+      tags: [notifications]
+      summary: Mark a notification read
+      parameters: [{ $ref: '#/components/parameters/Id' }]
+      responses:
+        '200': { description: Updated notification }
+
+  /hardware/capabilities:
+    get:
+      tags: [hardware]
+      summary: List supported hardware capabilities and registered drivers
+      responses:
+        '200':
+          description: Capability catalog
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/HardwareCatalog' }
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  parameters:
+    Id:
+      name: id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    Page:
+      name: page
+      in: query
+      schema: { type: integer, minimum: 1, default: 1 }
+    PageSize:
+      name: pageSize
+      in: query
+      schema: { type: integer, minimum: 1, maximum: 200, default: 25 }
+
+  responses:
+    Unauthorized:
+      description: Authentication required or failed
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ProblemDetails' }
+    Forbidden:
+      description: Missing required permission
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ProblemDetails' }
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ProblemDetails' }
+
+  schemas:
+    ProblemDetails:
+      type: object
+      description: RFC 7807-style error envelope
+      properties:
+        type: { type: string }
+        status: { type: integer }
+        title: { type: string }
+        instance: { type: string }
+        requestId: { type: string }
+        timestamp: { type: string, format: date-time }
+
+    VerificationResult:
+      type: string
+      enum: [PASS, REVIEW, FAIL]
+    RiskLevel:
+      type: string
+      enum: [LOW, MODERATE, HIGH, CRITICAL]
+    VisitStatus:
+      type: string
+      enum: [SCHEDULED, IN_PROGRESS, COMPLETED, FLAGGED, REJECTED, APPROVED, CANCELLED]
+    FraudEventType:
+      type: string
+      enum:
+        [IMPOSSIBLE_TRAVEL, DUPLICATE_VISIT, SHARED_DEVICE, GPS_ANOMALY, IDENTITY_MISMATCH,
+         UNUSUAL_BILLING, ABNORMAL_DURATION, EXCESSIVE_OVERTIME, SERVICE_OVERLAP,
+         CROSS_PROVIDER_RISK, LIVENESS_FAILURE, DEVICE_TAMPERING, GEOFENCE_BREACH]
+    CaseStatus:
+      type: string
+      enum: [OPEN, IN_REVIEW, ESCALATED, PENDING_PAYMENT_HOLD, SUBSTANTIATED, UNSUBSTANTIATED, CLOSED]
+    AuditAction:
+      type: string
+      enum: [CREATE, READ, UPDATE, DELETE, LOGIN, LOGOUT, EXPORT, VERIFY, SCORE, CASE_ACTION, CONFIG_CHANGE]
+    ReportType:
+      type: string
+      enum: [FRAUD_SUMMARY, PROVIDER_RISK, VISIT_VERIFICATION, INVESTIGATION, STATE_COMPLIANCE, EXECUTIVE_DASHBOARD]
+
+    Pagination:
+      type: object
+      properties:
+        page: { type: integer }
+        pageSize: { type: integer }
+        total: { type: integer }
+        totalPages: { type: integer }
+
+    LoginRequest:
+      type: object
+      required: [organizationSlug, email, password]
+      properties:
+        organizationSlug: { type: string, example: state-pi }
+        email: { type: string, format: email }
+        password: { type: string, format: password }
+        mfaCode: { type: string }
+    RefreshRequest:
+      type: object
+      required: [refreshToken]
+      properties:
+        refreshToken: { type: string }
+    TokenResponse:
+      type: object
+      properties:
+        accessToken: { type: string }
+        refreshToken: { type: string }
+        expiresIn: { type: integer }
+        tokenType: { type: string, example: Bearer }
+    Principal:
+      type: object
+      properties:
+        userId: { type: string, format: uuid }
+        organizationId: { type: string, format: uuid }
+        email: { type: string }
+        roles: { type: array, items: { type: string } }
+        permissions: { type: array, items: { type: string } }
+
+    VerifyIdentityRequest:
+      type: object
+      required: [caregiverId]
+      properties:
+        caregiverId: { type: string, format: uuid }
+        visitId: { type: string, format: uuid }
+        probeS3Key: { type: string }
+        simulate:
+          type: object
+          properties:
+            confidence: { type: number, minimum: 0, maximum: 1 }
+            liveness: { type: number, minimum: 0, maximum: 1 }
+    IdentityVerificationOutcome:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        result: { $ref: '#/components/schemas/VerificationResult' }
+        confidence: { type: number }
+        liveness: { type: number }
+        reasons: { type: array, items: { type: string } }
+
+    CreateVisitRequest:
+      type: object
+      required: [providerId, caregiverId, patientId, scheduledStart]
+      properties:
+        providerId: { type: string, format: uuid }
+        caregiverId: { type: string, format: uuid }
+        patientId: { type: string, format: uuid }
+        authorizationId: { type: string, format: uuid }
+        serviceCode: { type: string }
+        scheduledStart: { type: string, format: date-time }
+        scheduledEnd: { type: string, format: date-time }
+    ClockEvent:
+      type: object
+      required: [lat, lng]
+      properties:
+        lat: { type: number, minimum: -90, maximum: 90 }
+        lng: { type: number, minimum: -180, maximum: 180 }
+        accuracyMeters: { type: number }
+        capturedAt: { type: string, format: date-time }
+        deviceId: { type: string }
+    ClockOutEvent:
+      allOf:
+        - $ref: '#/components/schemas/ClockEvent'
+        - type: object
+          properties:
+            billedUnits: { type: integer }
+    Visit:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        status: { $ref: '#/components/schemas/VisitStatus' }
+        scheduledStart: { type: string, format: date-time }
+        verificationResult: { $ref: '#/components/schemas/VerificationResult' }
+        riskScore: { type: integer }
+        riskLevel: { $ref: '#/components/schemas/RiskLevel' }
+    VisitDetail:
+      allOf:
+        - $ref: '#/components/schemas/Visit'
+        - type: object
+          properties:
+            visitVerification: { type: object }
+            identityVerifications: { type: array, items: { type: object } }
+            gpsVerifications: { type: array, items: { type: object } }
+            deviceVerifications: { type: array, items: { type: object } }
+            fraudEvents: { type: array, items: { $ref: '#/components/schemas/FraudEvent' } }
+    PaginatedVisits:
+      allOf:
+        - $ref: '#/components/schemas/Pagination'
+        - type: object
+          properties:
+            data: { type: array, items: { $ref: '#/components/schemas/Visit' } }
+    VerificationRollup:
+      type: object
+      properties:
+        visitId: { type: string, format: uuid }
+        result: { $ref: '#/components/schemas/VerificationResult' }
+        status: { $ref: '#/components/schemas/VisitStatus' }
+        chain: { type: object }
+        evidenceHash: { type: string }
+        fraud: { $ref: '#/components/schemas/CompositeScore' }
+
+    FraudEvent:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        type: { $ref: '#/components/schemas/FraudEventType' }
+        severity: { type: integer }
+        riskLevel: { $ref: '#/components/schemas/RiskLevel' }
+        explanation: { type: string }
+        evidence: { type: object }
+        detectedAt: { type: string, format: date-time }
+    PaginatedFraudEvents:
+      allOf:
+        - $ref: '#/components/schemas/Pagination'
+        - type: object
+          properties:
+            data: { type: array, items: { $ref: '#/components/schemas/FraudEvent' } }
+    ScoreFactor:
+      type: object
+      properties:
+        type: { $ref: '#/components/schemas/FraudEventType' }
+        severity: { type: integer }
+        weight: { type: number }
+        contribution: { type: number }
+        explanation: { type: string }
+    CompositeScore:
+      type: object
+      properties:
+        score: { type: integer, minimum: 0, maximum: 100 }
+        riskLevel: { $ref: '#/components/schemas/RiskLevel' }
+        triggeredCount: { type: integer }
+        factors: { type: array, items: { $ref: '#/components/schemas/ScoreFactor' } }
+    ScoringOutcome:
+      type: object
+      properties:
+        visitId: { type: string, format: uuid }
+        composite: { $ref: '#/components/schemas/CompositeScore' }
+        fraudEventIds: { type: array, items: { type: string, format: uuid } }
+
+    CreateCaseRequest:
+      type: object
+      required: [title]
+      properties:
+        title: { type: string }
+        priority: { type: string, enum: [LOW, MEDIUM, HIGH, URGENT] }
+        providerId: { type: string, format: uuid }
+        summary: { type: string }
+        exposureCents: { type: integer }
+        fraudEventIds: { type: array, items: { type: string, format: uuid } }
+    Case:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        caseNumber: { type: string, example: RV-2026-000123 }
+        title: { type: string }
+        status: { $ref: '#/components/schemas/CaseStatus' }
+        priority: { type: string }
+        riskLevel: { $ref: '#/components/schemas/RiskLevel' }
+        exposureCents: { type: integer }
+    CaseDetail:
+      allOf:
+        - $ref: '#/components/schemas/Case'
+        - type: object
+          properties:
+            events: { type: array, items: { $ref: '#/components/schemas/FraudEvent' } }
+            notes: { type: array, items: { type: object } }
+            evidence: { type: array, items: { type: object } }
+
+    ProviderRiskProfile:
+      type: object
+      properties:
+        providerId: { type: string, format: uuid }
+        currentScore: { type: integer }
+        riskLevel: { $ref: '#/components/schemas/RiskLevel' }
+        verificationFailures: { type: integer }
+        gpsAnomalies: { type: integer }
+        billingAnomalies: { type: integer }
+        identityIssues: { type: integer }
+        openCases: { type: integer }
+        substantiatedCases: { type: integer }
+        trend:
+          type: array
+          items:
+            type: object
+            properties:
+              t: { type: string, format: date-time }
+              score: { type: integer }
+
+    RequestReport:
+      type: object
+      required: [type]
+      properties:
+        type: { $ref: '#/components/schemas/ReportType' }
+        format: { type: string, enum: [PDF, XLSX, CSV, JSON] }
+        parameters: { type: object }
+
+    HardwareCatalog:
+      type: object
+      properties:
+        supported:
+          type: array
+          items: { type: string, enum: [NFC, FINGERPRINT, FACE, SECURE_ELEMENT, GPS, LTE] }
+        registered:
+          type: array
+          items:
+            type: object
+            properties:
+              capability: { type: string }
+              driver: { type: string }
+              health: { type: string, enum: [ONLINE, DEGRADED, OFFLINE] }

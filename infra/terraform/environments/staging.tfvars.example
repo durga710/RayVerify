@@ -1,0 +1,70 @@
+################################################################################
+# environments/staging.tfvars.example
+#
+# Staging environment sizing — production-like but smaller instances.
+# Multi-AZ enabled. Read replica enabled for QA analytics.
+# Copy to staging.tfvars and fill in real values before use.
+################################################################################
+
+# Core
+aws_region  = "us-east-1"
+environment = "staging"
+az_count    = 2
+
+# DNS
+domain_name     = "staging.rayverify.example.com"
+api_subdomain   = "api"
+app_subdomain   = "app"
+route53_zone_id = "ZXXXXXXXXXXXXXXXXXXX"
+
+# Networking
+vpc_cidr = "10.1.0.0/16"
+
+# RDS — mid-tier, Multi-AZ, with read replica
+rds_instance_class        = "db.t3.large"
+rds_allocated_storage     = 50
+rds_max_allocated_storage = 250
+rds_engine_version        = "16.3"
+rds_backup_retention_days = 7
+rds_deletion_protection   = false
+rds_multi_az              = true
+rds_create_read_replica   = true
+rds_db_name               = "rayverify_staging"
+
+# Redis — primary + 1 replica for HA testing
+redis_node_type          = "cache.t3.small"
+redis_num_cache_clusters = 2
+redis_engine_version     = "7.1"
+
+# ECS — API service (2 tasks for HA testing)
+api_cpu           = 512
+api_memory        = 1024
+api_desired_count = 2
+api_min_count     = 1
+api_max_count     = 4
+api_image_tag     = "staging"
+
+# ECS — Worker service
+worker_cpu           = 512
+worker_memory        = 1024
+worker_desired_count = 2
+worker_min_count     = 1
+worker_max_count     = 4
+worker_image_tag     = "staging"
+
+# ECS — ML-scoring service
+ml_cpu           = 1024
+ml_memory        = 2048
+ml_desired_count = 1
+ml_min_count     = 1
+ml_max_count     = 3
+ml_image_tag     = "staging"
+
+# WAF
+waf_rate_limit = 3000
+
+# Alerts
+alert_email = "staging-alerts@example.com"
+
+# S3 Object Lock — 90 days in staging to validate WORM behaviour
+evidence_object_lock_days = 90

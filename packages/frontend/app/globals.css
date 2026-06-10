@@ -1,0 +1,115 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/*
+  RayVerify™ Investigator Dashboard
+  Government / security palette — clean, dense, data-first.
+  Dark tones, slate grays, precise accent colours.
+*/
+
+@layer base {
+  :root {
+    /* Backgrounds */
+    --background: 220 16% 96%;
+    --foreground: 222 47% 11%;
+
+    /* Cards */
+    --card: 0 0% 100%;
+    --card-foreground: 222 47% 11%;
+
+    /* Popovers */
+    --popover: 0 0% 100%;
+    --popover-foreground: 222 47% 11%;
+
+    /* Primary — deep navy-blue */
+    --primary: 217 91% 30%;
+    --primary-foreground: 0 0% 100%;
+
+    /* Secondary — slate */
+    --secondary: 215 16% 92%;
+    --secondary-foreground: 222 47% 20%;
+
+    /* Muted */
+    --muted: 215 16% 92%;
+    --muted-foreground: 215 16% 47%;
+
+    /* Accent */
+    --accent: 215 16% 92%;
+    --accent-foreground: 222 47% 11%;
+
+    /* Destructive */
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 0 0% 100%;
+
+    /* Border / input */
+    --border: 214 32% 88%;
+    --input: 214 32% 88%;
+    --ring: 217 91% 30%;
+
+    /* Radius */
+    --radius: 0.5rem;
+
+    /* Fonts */
+    --font-inter: "Inter", "system-ui", sans-serif;
+    --font-mono: "JetBrains Mono", "Fira Code", "ui-monospace", monospace;
+  }
+
+  .dark {
+    --background: 222 47% 8%;
+    --foreground: 213 31% 91%;
+    --card: 222 47% 11%;
+    --card-foreground: 213 31% 91%;
+    --popover: 222 47% 11%;
+    --popover-foreground: 213 31% 91%;
+    --primary: 213 80% 52%;
+    --primary-foreground: 222 47% 8%;
+    --secondary: 222 47% 16%;
+    --secondary-foreground: 213 31% 91%;
+    --muted: 222 47% 16%;
+    --muted-foreground: 215 20% 55%;
+    --accent: 222 47% 16%;
+    --accent-foreground: 213 31% 91%;
+    --destructive: 0 63% 55%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 222 47% 18%;
+    --input: 222 47% 18%;
+    --ring: 213 80% 52%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+  }
+  /* Dense table text */
+  table {
+    @apply text-sm;
+  }
+  /* Monospace for IDs / hashes */
+  .font-mono {
+    font-feature-settings: "zero";
+  }
+}
+
+/* Custom scrollbar — keeps it minimal in the sidebar */
+@layer utilities {
+  .scrollbar-thin {
+    scrollbar-width: thin;
+    scrollbar-color: hsl(var(--border)) transparent;
+  }
+  .scrollbar-thin::-webkit-scrollbar {
+    width: 4px;
+  }
+  .scrollbar-thin::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  .scrollbar-thin::-webkit-scrollbar-thumb {
+    background-color: hsl(var(--border));
+    border-radius: 9999px;
+  }
+}

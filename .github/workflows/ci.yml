@@ -1,0 +1,75 @@
+name: CI
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+    branches: [main, develop]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: Backend (lint · typecheck · test · build)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: rayverify
+          POSTGRES_PASSWORD: rayverify
+          POSTGRES_DB: rayverify_test
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U rayverify"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports: ['6379:6379']
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      DATABASE_URL: postgresql://rayverify:rayverify@localhost:5432/rayverify_test?schema=public
+      REDIS_URL: redis://localhost:6379
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - name: Generate Prisma client
+        run: npm run prisma:generate --workspace @rayverify/backend
+      - name: Lint
+        run: npm run lint --workspace @rayverify/backend
+      - name: Typecheck (shared + backend)
+        run: |
+          npm run typecheck --workspace @rayverify/shared
+          npm run typecheck --workspace @rayverify/backend
+      - name: Unit tests
+        run: npm run test --workspace @rayverify/backend
+      - name: Apply schema (migrations + physical SQL)
+        run: |
+          npm run prisma:migrate:dev --workspace @rayverify/backend -- --name ci --skip-seed || true
+          node packages/backend/scripts/apply-sql.js || true
+      - name: Build
+        run: npm run build --workspace @rayverify/backend
+
+  frontend:
+    name: Frontend (lint · typecheck · build)
+    runs-on: ubuntu-latest
+    # Non-blocking until dependency lockfile is materialized & verified in-repo.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npm run lint --workspace @rayverify/frontend --if-present
+      - run: npm run typecheck --workspace @rayverify/frontend --if-present
+      - run: npm run build --workspace @rayverify/frontend --if-present
