@@ -25,8 +25,8 @@ import {
 } from "@/lib/utils";
 import { RISK_BAND } from "@/lib/risk";
 import { FraudEvent, RiskLevel } from "@/lib/types";
-import { FraudTrendChart } from "./FraudTrendChart";
-import { RiskDistributionChart } from "./RiskDistributionChart";
+import { FraudTrendChart } from "../FraudTrendChart";
+import { RiskDistributionChart } from "../RiskDistributionChart";
 
 export const metadata: Metadata = { title: "Overview" };
 
@@ -73,7 +73,6 @@ export default function OverviewPage() {
         description="Maryland Medicaid OIG — real-time fraud intelligence summary"
       />
 
-      {/* KPI Row */}
       <div className="grid grid-cols-2 gap-4 xl:grid-cols-5">
         <StatCard
           title="Open Cases"
@@ -110,7 +109,6 @@ export default function OverviewPage() {
         />
       </div>
 
-      {/* Charts Row */}
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
         <Card className="xl:col-span-2">
           <CardHeader className="pb-2">
@@ -131,7 +129,6 @@ export default function OverviewPage() {
           </CardHeader>
           <CardContent>
             <RiskDistributionChart data={MOCK_RISK_DISTRIBUTION} />
-            {/* Legend */}
             <div className="mt-4 space-y-1.5">
               {MOCK_RISK_DISTRIBUTION.map((d) => {
                 const band = RISK_BAND[d.level as RiskLevel];
@@ -148,7 +145,7 @@ export default function OverviewPage() {
                       <span className="text-muted-foreground">{band.label}</span>
                     </div>
                     <span className="font-medium tabular-nums text-foreground">
-                      {d.count.toLocaleString()}{" "}
+                      {d.count.toLocaleString()} {" "}
                       <span className="text-muted-foreground">
                         ({formatPercent(d.pct)})
                       </span>
@@ -161,7 +158,6 @@ export default function OverviewPage() {
         </Card>
       </div>
 
-      {/* Recent Alerts */}
       <Card>
         <CardHeader className="pb-3">
           <CardTitle className="text-sm font-semibold">
