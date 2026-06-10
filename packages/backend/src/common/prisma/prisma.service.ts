@@ -50,16 +50,16 @@ export class PrismaService
    * health checks, auth bootstrap before login resolves an org).
    */
   forRequest() {
-    const self = this;
     return this.$extends({
       query: {
-        async $allOperations({ args, query }) {
+        // Arrow fn captures lexical `this` (the PrismaService instance).
+        $allOperations: async ({ args, query }) => {
           const orgId = TenantContext.orgId();
           if (!orgId) return query(args);
           // SET LOCAL keeps the GUC scoped to this transaction only, so the
           // RLS policy (organization_id = current_setting('app.current_org'))
           // applies to the wrapped operation and never leaks across requests.
-          return self.$transaction(async (tx) => {
+          return this.$transaction(async (tx) => {
             await tx.$executeRawUnsafe(
               `SET LOCAL "app.current_org" = '${orgId.replace(/'/g, "''")}'`,
             );

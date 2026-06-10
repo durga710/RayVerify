@@ -17,8 +17,8 @@ export class CasesService {
     return TenantContext.require();
   }
 
-  /** RV-YYYY-NNNNNN, sequential per tenant per year. */
-  private async nextCaseNumber(orgId: string): Promise<string> {
+  /** RV-YYYY-NNNNNN, sequential per tenant per year (RLS scopes the count). */
+  private async nextCaseNumber(): Promise<string> {
     const db = this.prisma.forRequest();
     const year = new Date().getFullYear();
     const count = await db.fraudCase.count({
@@ -30,7 +30,7 @@ export class CasesService {
   async create(dto: CreateCaseDto) {
     const db = this.prisma.forRequest();
     const orgId = this.ctx().organizationId;
-    const caseNumber = await this.nextCaseNumber(orgId);
+    const caseNumber = await this.nextCaseNumber();
 
     const created = await db.fraudCase.create({
       data: {

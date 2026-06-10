@@ -14,7 +14,6 @@ interface DataTableProps<T> {
   className?: string;
   emptyMessage?: string;
   rowKey: (row: T) => string;
-  onRowClick?: (row: T) => void;
 }
 
 export function DataTable<T>({
@@ -23,7 +22,6 @@ export function DataTable<T>({
   className,
   emptyMessage = "No records found.",
   rowKey,
-  onRowClick,
 }: DataTableProps<T>) {
   return (
     <div className={cn("w-full overflow-x-auto rounded-lg border border-border", className)}>
@@ -57,11 +55,7 @@ export function DataTable<T>({
             data.map((row) => (
               <tr
                 key={rowKey(row)}
-                className={cn(
-                  "transition-colors",
-                  onRowClick && "cursor-pointer hover:bg-muted/40"
-                )}
-                onClick={() => onRowClick?.(row)}
+                className={cn("transition-colors hover:bg-muted/40")}
               >
                 {columns.map((col) => (
                   <td key={col.key} className={cn("px-4 py-3", col.className)}>

@@ -9,7 +9,6 @@ import {
 import { StatCard } from "@/components/StatCard";
 import { PageHeader } from "@/components/PageHeader";
 import { RiskBadge } from "@/components/RiskBadge";
-import { VerificationResultBadge } from "@/components/VerificationResultBadge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { DataTable, Column } from "@/components/DataTable";
 import {

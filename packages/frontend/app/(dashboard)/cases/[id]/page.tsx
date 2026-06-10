@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import Link from "next/link";
-import { ArrowLeft, FileText, MapPin, Shield, User, Clock } from "lucide-react";
+import { ArrowLeft, FileText, Shield, User, Clock } from "lucide-react";
 import { PageHeader } from "@/components/PageHeader";
 import { RiskBadge } from "@/components/RiskBadge";
 import { FraudTimeline } from "@/components/FraudTimeline";

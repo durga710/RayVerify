@@ -1,5 +1,5 @@
 import { ValidationPipe, VersioningType } from '@nestjs/common';
-import { NestFactory, Reflector } from '@nestjs/core';
+import { NestFactory } from '@nestjs/core';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import helmet from 'helmet';
 import { AppModule } from './app.module';
@@ -19,8 +19,9 @@ async function bootstrap() {
       hsts: { maxAge: 63072000, includeSubDomains: true, preload: true },
     }),
   );
+  const corsOrigins = (process.env.CORS_ORIGINS ?? '').split(',').filter(Boolean);
   app.enableCors({
-    origin: (process.env.CORS_ORIGINS ?? '').split(',').filter(Boolean) || true,
+    origin: corsOrigins.length ? corsOrigins : true,
     credentials: true,
   });
 

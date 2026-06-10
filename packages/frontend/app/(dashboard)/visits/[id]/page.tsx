@@ -18,7 +18,6 @@ import { RiskBadge } from "@/components/RiskBadge";
 import { VerificationResultBadge } from "@/components/VerificationResultBadge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Separator } from "@/components/ui/separator";
 import { MOCK_VISITS } from "@/lib/mock";
 import {
   VerificationChainStep,

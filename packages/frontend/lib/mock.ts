@@ -10,8 +10,6 @@ import {
   CaseNote,
   CasePriority,
   CaseStatus,
-  DevicePlatform,
-  DeviceTrustLevel,
   FraudCase,
   FraudEvent,
   FraudEventStatus,
@@ -35,7 +33,6 @@ import {
   VerificationResult,
   Visit,
   VisitStatus,
-  VisitVerification,
 } from "./types";
 
 // ---------------------------------------------------------------------------

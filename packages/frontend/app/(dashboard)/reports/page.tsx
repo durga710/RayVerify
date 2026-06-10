@@ -13,7 +13,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { DataTable, Column } from "@/components/DataTable";
 import { MOCK_REPORTS } from "@/lib/mock";
-import { Report, ReportStatus, ReportType, ReportFormat } from "@/lib/types";
+import { Report, ReportStatus, ReportType } from "@/lib/types";
 import { formatDateTime, formatDate } from "@/lib/utils";
 
 export const metadata: Metadata = { title: "Reports" };
