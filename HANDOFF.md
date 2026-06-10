@@ -3,7 +3,7 @@
 **To:** Sishir Phuyal
 **From:** Durga Ghimeray (RayHealthEVV™)
 **Date:** 2026-06-10
-**Branch:** `claude/kind-carson-8f3b5l` (4 commits, full history)
+**Branch:** `Durgas-Mac-mini`
 
 ---
 
@@ -17,22 +17,15 @@ This repo is the **foundation drop**: the complete data model, production SQL sc
 
 ---
 
-## 2. Getting the code & pushing to GitHub
-
-⚠️ **Current blocker:** the automated session could not push to `durga710/RayVerify` — both the git proxy and the GitHub App integration return 403 (the Claude GitHub App installation lacks `contents`/`pull_requests` write). The remote repo is **empty**. Until that's fixed, the source of truth is the **git bundle** Durga has (`rayverify-foundation.bundle`).
-
-Restore and push from your machine (with your own GitHub credentials):
+## 2. Getting the code
 
 ```bash
-git clone rayverify-foundation.bundle RayVerify
+git clone https://github.com/durga710/RayVerify.git
 cd RayVerify
-git checkout claude/kind-carson-8f3b5l
-git remote add origin git@github.com:durga710/RayVerify.git
-git push -u origin claude/kind-carson-8f3b5l
-# Optionally make it the default branch, or open a PR into main once main exists.
+git checkout Durgas-Mac-mini
 ```
 
-The bundle records complete history (`git bundle verify` passes). After pushing, CI (`.github/workflows/ci.yml`) should go green as-is.
+The `Durgas-Mac-mini` branch carries the complete foundation with full history; a PR merges it into `main`. CI (`.github/workflows/ci.yml`) runs automatically on the PR.
 
 ---
 
@@ -189,7 +182,7 @@ CI (`.github/workflows/ci.yml`) runs the same plus an ephemeral Postgres/Redis, 
 
 ## 9. Suggested first two weeks
 
-1. **Day 1:** Restore bundle → push → CI green on GitHub. Run quickstart; exercise the seeded anomaly visit end-to-end.
+1. **Day 1:** Clone the repo, get CI green, run the quickstart; exercise the seeded anomaly visit end-to-end.
 2. Generate the **init Prisma migration** + ordered SQL migrations for partitions/RLS/triggers (gap #9). Tighten the CI migrate step.
 3. Create a **non-superuser DB role** locally; add integration tests proving cross-tenant isolation (two orgs, assert zero leakage) and the ALS rule (#11).
 4. Wire **frontend → API** for one vertical slice (login → visits list → visit detail with real verification chain), keeping mocks elsewhere.

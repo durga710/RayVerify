@@ -743,7 +743,7 @@ PHI disposal uses AWS S3 object expiration (hard delete) and RDS partition drop.
 
 RayVerify operates as a Business Associate under HIPAA §164.308(b). Before any tenant may upload PHI:
 
-1. A signed **BAA** must be on file between RayVerify (Anthropic/operator entity) and the covered entity (state Medicaid agency, MCO).
+1. A signed **BAA** must be on file between RayVerify (the operating business entity) and the covered entity (state Medicaid agency, MCO).
 2. AWS provides a BAA covering all AWS services used by RayVerify (RDS, S3, KMS, ECS, CloudFront, SecretsManager, CloudWatch).
 3. Any third-party sub-processors that touch PHI (biometric matching vendors, SMS providers) must have a BAA in place and be listed in the sub-processor disclosure.
 
