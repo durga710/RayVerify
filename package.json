@@ -24,6 +24,11 @@
     "db:seed": "npm run prisma:seed --workspace packages/backend",
     "dev:infra": "docker compose up -d"
   },
+  "overrides": {
+    "@nestjs/common": "11.1.26",
+    "@nestjs/core": "11.1.26",
+    "@nestjs/platform-express": "11.1.26"
+  },
   "devDependencies": {
     "prettier": "^3.3.3"
   }
