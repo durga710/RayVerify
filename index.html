@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Wilder — Join the Waitlist</title>
+    <style>
+      body {
+        margin: 0;
+        font-family: system-ui, -apple-system, sans-serif;
+        background: linear-gradient(120deg, #141e30, #243b55);
+        color: white;
+        text-align: center;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        height: 100vh;
+      }
+      h1 {
+        font-size: 3rem;
+        margin-bottom: 0.5rem;
+      }
+      p {
+        font-size: 1.25rem;
+        opacity: 0.8;
+        margin-bottom: 2rem;
+      }
+      form {
+        display: flex;
+        flex-direction: row;
+        justify-content: center;
+        background: rgba(255,255,255,0.1);
+        border-radius: 8px;
+        overflow: hidden;
+      }
+      input[type="email"] {
+        border: none;
+        padding: 1rem;
+        font-size: 1rem;
+        width: 250px;
+        outline: none;
+        color: #333;
+      }
+      button {
+        background-color: #ff7a18;
+        border: none;
+        color: white;
+        padding: 1rem 1.5rem;
+        font-size: 1rem;
+        cursor: pointer;
+      }
+      button:hover {
+        background-color: #ff9e47;
+      }
+      footer {
+        position: absolute;
+        bottom: 20px;
+        font-size: 0.85rem;
+        opacity: 0.6;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Wilder</h1>
+    <p>Be the first to experience what’s next. Join the waitlist.</p>
+    <form id="waitlist-form" method="POST" action="/api/waitlist">
+      <input type="email" name="email" placeholder="you@example.com" required />
+      <button type="submit">Notify Me</button>
+    </form>
+    <footer>© 2024 Wilder</footer>
+    <script>
+      document.getElementById('waitlist-form').addEventListener('submit', async function (e) {
+        e.preventDefault();
+        const email = e.target.email.value;
+        const res = await fetch('/api/waitlist', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email })
+        });
+        if (res.ok) {
+          alert('Thanks for joining the waitlist!');
+          e.target.reset();
+        } else {
+          alert('There was a problem. Please try again later.');
+        }
+      });
+    </script>
+  </body>
+</html>
