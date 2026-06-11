@@ -1,0 +1,49 @@
+# Local development infrastructure for RayVerify.
+# Brings up Postgres, Redis, and LocalStack (S3) so the backend runs end-to-end.
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: rayverify-postgres
+    environment:
+      POSTGRES_USER: rayverify
+      POSTGRES_PASSWORD: rayverify
+      POSTGRES_DB: rayverify
+    ports:
+      - '5432:5432'
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U rayverify']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: rayverify-redis
+    command: ['redis-server', '--appendonly', 'yes']
+    ports:
+      - '6379:6379'
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  localstack:
+    image: localstack/localstack:3
+    container_name: rayverify-localstack
+    environment:
+      SERVICES: s3,kms,secretsmanager
+      DEFAULT_REGION: us-east-1
+    ports:
+      - '4566:4566'
+    volumes:
+      - localstackdata:/var/lib/localstack
+
+volumes:
+  pgdata:
+  redisdata:
+  localstackdata:

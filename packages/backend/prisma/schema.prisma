@@ -1,0 +1,868 @@
+// =============================================================================
+// RayVerify™ — Prisma Schema (canonical data model)
+// Government-grade fraud detection & identity verification for Medicaid / HCBS.
+//
+// Conventions:
+//   * Multi-tenant: every business table carries `organizationId` (tenant root).
+//   * Surrogate PKs are UUID v4 (`@db.Uuid`). Natural keys are kept as unique.
+//   * Money is stored in integer cents (`Int`) to avoid float drift.
+//   * Geo coords use Decimal(9,6) (~11cm precision) — see db/schema.sql for the
+//     optional PostGIS upgrade path.
+//   * Append-only / immutable tables (audit_logs, *_verifications, fraud_events)
+//     are never UPDATEd by application code; enforced at the DB layer (triggers).
+//   * Partitioning (visits, audit_logs, *_verifications) is applied in raw SQL
+//     migrations — Prisma manages the logical model, SQL manages the physical.
+// =============================================================================
+
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["postgresqlExtensions", "views"]
+}
+
+datasource db {
+  provider   = "postgresql"
+  url        = env("DATABASE_URL")
+  extensions = [pgcrypto, citext, pg_trgm]
+}
+
+// =============================================================================
+// ENUMS
+// =============================================================================
+
+enum UserStatus {
+  ACTIVE
+  INACTIVE
+  SUSPENDED
+  LOCKED
+  PENDING_INVITE
+}
+
+enum MfaMethod {
+  NONE
+  TOTP
+  SMS
+  WEBAUTHN
+}
+
+/// Result of any verification step (identity, gps, device, visit).
+enum VerificationResult {
+  PASS
+  REVIEW
+  FAIL
+}
+
+/// 0-30 LOW · 31-60 MODERATE · 61-80 HIGH · 81-100 CRITICAL
+enum RiskLevel {
+  LOW
+  MODERATE
+  HIGH
+  CRITICAL
+}
+
+enum VisitStatus {
+  SCHEDULED
+  IN_PROGRESS
+  COMPLETED
+  FLAGGED
+  REJECTED
+  APPROVED
+  CANCELLED
+}
+
+enum IdentityMethod {
+  SELFIE
+  LIVENESS
+  DEVICE_TRUST
+  FINGERPRINT // future hardware
+  NFC_CARD // future hardware
+  GOV_CREDENTIAL // future (NIST 800-63 IAL2/IAL3)
+}
+
+enum DeviceTrustLevel {
+  TRUSTED
+  UNKNOWN
+  SUSPICIOUS
+  BLOCKED
+}
+
+enum DevicePlatform {
+  IOS
+  ANDROID
+  WEB
+  HARDWARE_TERMINAL
+}
+
+/// Catalog of detectable fraud signals (Fraud Intelligence Engine).
+enum FraudEventType {
+  IMPOSSIBLE_TRAVEL
+  DUPLICATE_VISIT
+  SHARED_DEVICE
+  GPS_ANOMALY
+  IDENTITY_MISMATCH
+  UNUSUAL_BILLING
+  ABNORMAL_DURATION
+  EXCESSIVE_OVERTIME
+  SERVICE_OVERLAP
+  CROSS_PROVIDER_RISK
+  LIVENESS_FAILURE
+  DEVICE_TAMPERING
+  GEOFENCE_BREACH
+}
+
+enum FraudEventStatus {
+  OPEN
+  TRIAGED
+  LINKED_TO_CASE
+  DISMISSED
+  CONFIRMED
+}
+
+enum CaseStatus {
+  OPEN
+  IN_REVIEW
+  ESCALATED
+  PENDING_PAYMENT_HOLD
+  SUBSTANTIATED
+  UNSUBSTANTIATED
+  CLOSED
+}
+
+enum CasePriority {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
+}
+
+enum ScoreSubjectType {
+  VISIT
+  PROVIDER
+  CAREGIVER
+  PATIENT
+  CLAIM
+}
+
+enum ReportType {
+  FRAUD_SUMMARY
+  PROVIDER_RISK
+  VISIT_VERIFICATION
+  INVESTIGATION
+  STATE_COMPLIANCE
+  EXECUTIVE_DASHBOARD
+}
+
+enum ReportFormat {
+  PDF
+  XLSX
+  CSV
+  JSON
+}
+
+enum ReportStatus {
+  QUEUED
+  GENERATING
+  READY
+  FAILED
+  EXPIRED
+}
+
+enum NotificationChannel {
+  IN_APP
+  EMAIL
+  SMS
+  WEBHOOK
+}
+
+enum NotificationStatus {
+  PENDING
+  SENT
+  DELIVERED
+  READ
+  FAILED
+}
+
+enum AuditAction {
+  CREATE
+  READ
+  UPDATE
+  DELETE
+  LOGIN
+  LOGOUT
+  EXPORT
+  VERIFY
+  SCORE
+  CASE_ACTION
+  CONFIG_CHANGE
+}
+
+// =============================================================================
+// TENANCY, IDENTITY & ACCESS CONTROL
+// =============================================================================
+
+/// Tenant root. A state Medicaid agency, MCO, or oversight unit.
+model Organization {
+  id           String   @id @default(uuid()) @db.Uuid
+  name         String
+  slug         String   @unique @db.Citext
+  /// State / federal program identifier (e.g. FIPS code, CMS region).
+  jurisdiction String?
+  /// Free-form tenant configuration (feature flags, thresholds, branding).
+  settings     Json     @default("{}")
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  users               User[]
+  roles               Role[]
+  providers           Provider[]
+  patients            Patient[]
+  caregivers          Caregiver[]
+  devices             Device[]
+  visits              Visit[]
+  visitVerifications  VisitVerification[]
+  identityVerifications IdentityVerification[]
+  gpsVerifications    GpsVerification[]
+  deviceVerifications DeviceVerification[]
+  fraudEvents         FraudEvent[]
+  fraudCases          FraudCase[]
+  fraudScores         FraudScore[]
+  riskProfiles        ProviderRiskProfile[]
+  serviceAuthorizations ServiceAuthorization[]
+  reports             Report[]
+  notifications       Notification[]
+  auditLogs           AuditLog[]
+
+  @@index([slug])
+  @@map("organizations")
+}
+
+/// Platform & tenant users (investigators, auditors, admins, compliance).
+model User {
+  id             String     @id @default(uuid()) @db.Uuid
+  organizationId String     @db.Uuid
+  email          String     @db.Citext
+  /// Argon2id hash — never store plaintext. Null for SSO-only accounts.
+  passwordHash   String?
+  firstName      String
+  lastName       String
+  phone          String?
+  status         UserStatus @default(PENDING_INVITE)
+  mfaMethod      MfaMethod  @default(NONE)
+  /// Encrypted (AES-256-GCM) TOTP secret; envelope-encrypted via KMS.
+  mfaSecret      String?
+  lastLoginAt    DateTime?
+  failedLogins   Int        @default(0)
+  lockedUntil    DateTime?
+  createdAt      DateTime   @default(now())
+  updatedAt      DateTime   @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  userRoles    UserRole[]
+  sessions     Session[]
+  assignedCases FraudCase[]   @relation("CaseAssignee")
+  caseNotes    CaseNote[]
+  auditLogs    AuditLog[]
+  notifications Notification[]
+  reports      Report[]
+
+  @@unique([organizationId, email])
+  @@index([organizationId, status])
+  @@map("users")
+}
+
+model Session {
+  id               String   @id @default(uuid()) @db.Uuid
+  userId           String   @db.Uuid
+  /// SHA-256 of the refresh token; raw token never persisted.
+  refreshTokenHash String   @unique
+  userAgent        String?
+  ipAddress        String?
+  expiresAt        DateTime
+  revokedAt        DateTime?
+  createdAt        DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, expiresAt])
+  @@map("sessions")
+}
+
+model Role {
+  id             String   @id @default(uuid()) @db.Uuid
+  organizationId String   @db.Uuid
+  /// e.g. INVESTIGATOR, AUDITOR, COMPLIANCE_OFFICER, ORG_ADMIN, OIG_AGENT
+  key            String
+  name           String
+  description    String?
+  /// System roles are seeded and cannot be deleted by tenants.
+  isSystem       Boolean  @default(false)
+  createdAt      DateTime @default(now())
+
+  organization    Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  rolePermissions RolePermission[]
+  userRoles       UserRole[]
+
+  @@unique([organizationId, key])
+  @@map("roles")
+}
+
+/// Global permission catalog (not tenant-scoped). Format: "resource:action".
+model Permission {
+  id          String   @id @default(uuid()) @db.Uuid
+  key         String   @unique // e.g. "fraud_case:assign", "report:export"
+  description String?
+
+  rolePermissions RolePermission[]
+
+  @@map("permissions")
+}
+
+model RolePermission {
+  roleId       String @db.Uuid
+  permissionId String @db.Uuid
+
+  role       Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@id([roleId, permissionId])
+  @@map("role_permissions")
+}
+
+model UserRole {
+  userId String @db.Uuid
+  roleId String @db.Uuid
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role Role @relation(fields: [roleId], references: [id], onDelete: Cascade)
+
+  @@id([userId, roleId])
+  @@map("user_roles")
+}
+
+// =============================================================================
+// DOMAIN: PROVIDERS, CAREGIVERS, PATIENTS, AUTHORIZATIONS
+// =============================================================================
+
+/// A billing agency / home-care organization enrolled in Medicaid.
+model Provider {
+  id             String   @id @default(uuid()) @db.Uuid
+  organizationId String   @db.Uuid
+  /// National Provider Identifier (10-digit, Luhn-checked).
+  npi            String?
+  /// Medicaid provider enrollment id within the jurisdiction.
+  medicaidId     String?
+  legalName      String
+  taxId          String? // encrypted at rest
+  isActive       Boolean  @default(true)
+  enrolledAt     DateTime @default(now())
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organization Organization         @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  caregivers   Caregiver[]
+  visits       Visit[]
+  riskProfile  ProviderRiskProfile?
+  fraudCases   FraudCase[]
+
+  @@unique([organizationId, npi])
+  @@index([organizationId, isActive])
+  @@map("providers")
+}
+
+/// The individual delivering care — the subject of identity verification.
+model Caregiver {
+  id             String     @id @default(uuid()) @db.Uuid
+  organizationId String     @db.Uuid
+  providerId     String     @db.Uuid
+  externalId     String? // payroll / scheduling system id
+  firstName      String
+  lastName       String
+  email          String?    @db.Citext
+  phone          String?
+  status         UserStatus @default(ACTIVE)
+  createdAt      DateTime   @default(now())
+  updatedAt      DateTime   @updatedAt
+
+  organization      Organization        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  provider          Provider            @relation(fields: [providerId], references: [id], onDelete: Cascade)
+  enrollments       BiometricEnrollment[]
+  visits            Visit[]
+  identityVerifications IdentityVerification[]
+
+  @@index([organizationId, providerId])
+  @@map("caregivers")
+}
+
+/// Biometric reference template for a caregiver (face embedding, future modalities).
+model BiometricEnrollment {
+  id             String         @id @default(uuid()) @db.Uuid
+  caregiverId    String         @db.Uuid
+  method         IdentityMethod @default(SELFIE)
+  /// S3 key of the encrypted reference image (PHI; KMS-encrypted, lifecycle'd).
+  referenceS3Key String?
+  /// Pointer to the face-embedding vector store record (not the raw vector).
+  templateRef    String?
+  isActive       Boolean        @default(true)
+  enrolledAt     DateTime       @default(now())
+  retiredAt      DateTime?
+
+  caregiver Caregiver @relation(fields: [caregiverId], references: [id], onDelete: Cascade)
+
+  @@index([caregiverId, isActive])
+  @@map("biometric_enrollments")
+}
+
+/// The Medicaid beneficiary receiving services.
+model Patient {
+  id             String   @id @default(uuid()) @db.Uuid
+  organizationId String   @db.Uuid
+  /// Medicaid member id (PHI; encrypted at rest, searchable via blind index).
+  medicaidMemberId String?
+  firstName      String
+  lastName       String
+  dateOfBirth    DateTime? @db.Date
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organization   Organization           @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  visits         Visit[]
+  authorizations ServiceAuthorization[]
+
+  @@index([organizationId])
+  @@map("patients")
+}
+
+/// Authorized service + the geofence anchor (address + radius) used by GPS rules.
+model ServiceAuthorization {
+  id             String    @id @default(uuid()) @db.Uuid
+  organizationId String    @db.Uuid
+  patientId      String    @db.Uuid
+  serviceCode    String // HCPCS / state-specific (e.g. T1019 personal care)
+  description    String?
+  addressLine1   String?
+  addressLine2   String?
+  city           String?
+  state          String?
+  postalCode     String?
+  latitude       Decimal?  @db.Decimal(9, 6)
+  longitude      Decimal?  @db.Decimal(9, 6)
+  /// Approved geofence radius in meters (PASS threshold).
+  radiusMeters   Int       @default(150)
+  authorizedUnits Int?     // periodic unit cap (overtime/overlap checks)
+  startDate      DateTime  @db.Date
+  endDate        DateTime? @db.Date
+  isActive       Boolean   @default(true)
+  createdAt      DateTime  @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  patient      Patient      @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  visits       Visit[]
+
+  @@index([organizationId, patientId, isActive])
+  @@map("service_authorizations")
+}
+
+// =============================================================================
+// DEVICE TRUST
+// =============================================================================
+
+model Device {
+  id              String           @id @default(uuid()) @db.Uuid
+  organizationId  String           @db.Uuid
+  /// Stable client-generated device id.
+  deviceId        String
+  /// Hash of the composite device fingerprint (model+os+screen+sensors...).
+  fingerprintHash String?
+  platform        DevicePlatform   @default(WEB)
+  osVersion       String?
+  browser         String?
+  appVersion      String?
+  lastIpAddress   String?
+  trustLevel      DeviceTrustLevel @default(UNKNOWN)
+  isEmulator      Boolean          @default(false)
+  isRooted        Boolean          @default(false)
+  isJailbroken    Boolean          @default(false)
+  firstSeenAt     DateTime         @default(now())
+  lastSeenAt      DateTime         @default(now())
+
+  organization        Organization         @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  visits              Visit[]
+  deviceVerifications DeviceVerification[]
+
+  @@unique([organizationId, deviceId])
+  @@index([organizationId, trustLevel])
+  @@index([fingerprintHash])
+  @@map("devices")
+}
+
+// =============================================================================
+// VISITS & THE VERIFICATION CHAIN
+// =============================================================================
+
+/// A single delivered service event. Partitioned by `scheduledStart` (monthly).
+model Visit {
+  id              String      @id @default(uuid()) @db.Uuid
+  organizationId  String      @db.Uuid
+  providerId      String      @db.Uuid
+  caregiverId     String      @db.Uuid
+  patientId       String      @db.Uuid
+  authorizationId String?     @db.Uuid
+  deviceId        String?     @db.Uuid
+  serviceCode     String?
+  status          VisitStatus @default(SCHEDULED)
+
+  scheduledStart  DateTime
+  scheduledEnd    DateTime?
+  clockInAt       DateTime?
+  clockOutAt      DateTime?
+  durationMinutes Int?
+
+  /// Captured clock-in geo (denormalized from gps_verification for fast query).
+  clockInLat      Decimal?    @db.Decimal(9, 6)
+  clockInLng      Decimal?    @db.Decimal(9, 6)
+
+  /// Billing
+  billedUnits     Int?
+  billedAmountCents Int?
+
+  /// Rolled-up outcomes from the verification chain.
+  verificationResult VerificationResult?
+  riskScore          Int?     @default(0) // 0-100 snapshot
+  riskLevel          RiskLevel?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  organization        Organization          @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  provider            Provider              @relation(fields: [providerId], references: [id])
+  caregiver           Caregiver             @relation(fields: [caregiverId], references: [id])
+  patient             Patient               @relation(fields: [patientId], references: [id])
+  authorization       ServiceAuthorization? @relation(fields: [authorizationId], references: [id])
+  device              Device?               @relation(fields: [deviceId], references: [id])
+  visitVerification   VisitVerification?
+  identityVerifications IdentityVerification[]
+  gpsVerifications    GpsVerification[]
+  deviceVerifications DeviceVerification[]
+  fraudEvents         FraudEvent[]
+
+  @@index([organizationId, status])
+  @@index([organizationId, scheduledStart])
+  @@index([caregiverId, scheduledStart])
+  @@index([patientId, scheduledStart])
+  @@index([providerId, scheduledStart])
+  @@map("visits")
+}
+
+/// Immutable rollup binding the full verification package for a visit.
+model VisitVerification {
+  id             String             @id @default(uuid()) @db.Uuid
+  organizationId String             @db.Uuid
+  visitId        String             @unique @db.Uuid
+  result         VerificationResult
+  riskScore      Int                @default(0)
+  riskLevel      RiskLevel          @default(LOW)
+  /// Per-step results & contributing factors (identity/gps/device/patient/fraud).
+  chain          Json               @default("{}")
+  /// SHA-256 over the canonical evidence package — tamper-evidence anchor.
+  evidenceHash   String?
+  approvedById   String?            @db.Uuid
+  approvedAt     DateTime?
+  createdAt      DateTime           @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  visit        Visit        @relation(fields: [visitId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId, result])
+  @@map("visit_verifications")
+}
+
+/// Append-only record of a single identity verification attempt.
+model IdentityVerification {
+  id              String             @id @default(uuid()) @db.Uuid
+  organizationId  String             @db.Uuid
+  visitId         String?            @db.Uuid
+  caregiverId     String             @db.Uuid
+  method          IdentityMethod     @default(SELFIE)
+  result          VerificationResult
+  /// 0.0-1.0 face-match confidence.
+  confidenceScore Decimal?           @db.Decimal(5, 4)
+  /// 0.0-1.0 liveness probability.
+  livenessScore   Decimal?           @db.Decimal(5, 4)
+  /// S3 key of the encrypted probe image (PHI).
+  probeS3Key      String?
+  /// Provider used (internal model id / vendor).
+  matcher         String?
+  reasons         Json               @default("[]") // explainability factors
+  createdAt       DateTime           @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  visit        Visit?       @relation(fields: [visitId], references: [id], onDelete: Cascade)
+  caregiver    Caregiver    @relation(fields: [caregiverId], references: [id])
+
+  @@index([organizationId, result])
+  @@index([caregiverId, createdAt])
+  @@map("identity_verifications")
+}
+
+/// Append-only GPS evidence + geofence decision for a visit clock event.
+model GpsVerification {
+  id              String             @id @default(uuid()) @db.Uuid
+  organizationId  String             @db.Uuid
+  visitId         String             @db.Uuid
+  latitude        Decimal            @db.Decimal(9, 6)
+  longitude       Decimal            @db.Decimal(9, 6)
+  accuracyMeters  Decimal?           @db.Decimal(7, 2)
+  /// Distance from authorized service address, meters.
+  distanceMeters  Decimal?           @db.Decimal(10, 2)
+  result          VerificationResult
+  capturedAt      DateTime
+  /// "CLOCK_IN" | "CLOCK_OUT" | "MID_VISIT"
+  eventType       String             @default("CLOCK_IN")
+  rawPayload      Json?              @default("{}")
+  createdAt       DateTime           @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  visit        Visit        @relation(fields: [visitId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId, result])
+  @@index([visitId, capturedAt])
+  @@map("gps_verifications")
+}
+
+/// Append-only device posture snapshot captured during a visit.
+model DeviceVerification {
+  id             String             @id @default(uuid()) @db.Uuid
+  organizationId String             @db.Uuid
+  visitId        String?            @db.Uuid
+  deviceId       String             @db.Uuid
+  result         VerificationResult
+  trustLevel     DeviceTrustLevel
+  ipAddress      String?
+  signals        Json               @default("{}") // emulator/root/jailbreak/etc
+  createdAt      DateTime           @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  visit        Visit?       @relation(fields: [visitId], references: [id], onDelete: Cascade)
+  device       Device       @relation(fields: [deviceId], references: [id])
+
+  @@index([organizationId, result])
+  @@map("device_verifications")
+}
+
+// =============================================================================
+// FRAUD INTELLIGENCE
+// =============================================================================
+
+/// A single detected fraud signal. Append-only; immutable evidence.
+model FraudEvent {
+  id             String           @id @default(uuid()) @db.Uuid
+  organizationId String           @db.Uuid
+  visitId        String?          @db.Uuid
+  caseId         String?          @db.Uuid
+  type           FraudEventType
+  status         FraudEventStatus @default(OPEN)
+  /// Detector confidence 0-100 contributed to the composite score.
+  severity       Int              @default(0)
+  riskLevel      RiskLevel        @default(LOW)
+  /// Human-readable explanation + structured factors (explainability).
+  explanation    String?
+  evidence       Json             @default("{}")
+  /// Detector identifier + version for reproducibility.
+  detector       String?
+  detectorVersion String?
+  detectedAt     DateTime         @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  visit        Visit?       @relation(fields: [visitId], references: [id], onDelete: SetNull)
+  case         FraudCase?   @relation(fields: [caseId], references: [id], onDelete: SetNull)
+
+  @@index([organizationId, type, status])
+  @@index([organizationId, detectedAt])
+  @@index([caseId])
+  @@map("fraud_events")
+}
+
+/// An investigation grouping related fraud events for case management.
+model FraudCase {
+  id             String       @id @default(uuid()) @db.Uuid
+  organizationId String       @db.Uuid
+  /// Human-friendly case number, e.g. RV-2026-000123.
+  caseNumber     String
+  title          String
+  status         CaseStatus   @default(OPEN)
+  priority       CasePriority @default(MEDIUM)
+  riskLevel      RiskLevel    @default(MODERATE)
+  providerId     String?      @db.Uuid
+  assigneeId     String?      @db.Uuid
+  /// Estimated dollars at risk (cents).
+  exposureCents  Int?
+  summary        String?
+  openedAt       DateTime     @default(now())
+  closedAt       DateTime?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  provider     Provider?    @relation(fields: [providerId], references: [id])
+  assignee     User?        @relation("CaseAssignee", fields: [assigneeId], references: [id])
+  events       FraudEvent[]
+  notes        CaseNote[]
+  evidence     CaseEvidence[]
+
+  @@unique([organizationId, caseNumber])
+  @@index([organizationId, status, priority])
+  @@index([assigneeId])
+  @@map("fraud_cases")
+}
+
+model CaseNote {
+  id        String   @id @default(uuid()) @db.Uuid
+  caseId    String   @db.Uuid
+  authorId  String   @db.Uuid
+  body      String
+  /// Internal investigator notes are not exportable in beneficiary disclosures.
+  isInternal Boolean @default(true)
+  createdAt DateTime @default(now())
+
+  case   FraudCase @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  author User      @relation(fields: [authorId], references: [id])
+
+  @@index([caseId, createdAt])
+  @@map("case_notes")
+}
+
+model CaseEvidence {
+  id          String   @id @default(uuid()) @db.Uuid
+  caseId      String   @db.Uuid
+  label       String
+  kind        String // "VISIT" | "GPS" | "IDENTITY" | "DOCUMENT" | "EXPORT"
+  /// Pointer to the underlying record or S3 object.
+  refId       String?
+  s3Key       String?
+  /// SHA-256 for chain-of-custody integrity.
+  contentHash String?
+  addedById   String?  @db.Uuid
+  createdAt   DateTime @default(now())
+
+  case FraudCase @relation(fields: [caseId], references: [id], onDelete: Cascade)
+
+  @@index([caseId])
+  @@map("case_evidence")
+}
+
+/// Time-series of computed risk scores for any subject (visit/provider/...).
+model FraudScore {
+  id             String           @id @default(uuid()) @db.Uuid
+  organizationId String           @db.Uuid
+  subjectType    ScoreSubjectType
+  subjectId      String           @db.Uuid
+  score          Int // 0-100
+  riskLevel      RiskLevel
+  /// Per-feature contributions (SHAP-style) for explainability.
+  factors        Json             @default("[]")
+  modelVersion   String?
+  computedAt     DateTime         @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId, subjectType, subjectId, computedAt])
+  @@map("fraud_scores")
+}
+
+/// Current, denormalized risk standing per provider (1:1, kept hot for ranking).
+model ProviderRiskProfile {
+  id              String    @id @default(uuid()) @db.Uuid
+  organizationId  String    @db.Uuid
+  providerId      String    @unique @db.Uuid
+  currentScore    Int       @default(0)
+  riskLevel       RiskLevel @default(LOW)
+  verificationFailures Int  @default(0)
+  gpsAnomalies    Int       @default(0)
+  billingAnomalies Int      @default(0)
+  identityIssues  Int       @default(0)
+  openCases       Int       @default(0)
+  substantiatedCases Int    @default(0)
+  /// Sparkline / historical trend points: [{ t, score }].
+  trend           Json      @default("[]")
+  lastComputedAt  DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  provider     Provider     @relation(fields: [providerId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId, riskLevel])
+  @@map("provider_risk_profiles")
+}
+
+// =============================================================================
+// REPORTING, NOTIFICATIONS, AUDIT
+// =============================================================================
+
+model Report {
+  id             String       @id @default(uuid()) @db.Uuid
+  organizationId String       @db.Uuid
+  type           ReportType
+  format         ReportFormat @default(PDF)
+  status         ReportStatus @default(QUEUED)
+  /// Filters / date-range / scope used to generate the report.
+  parameters     Json         @default("{}")
+  s3Key          String?
+  requestedById  String?      @db.Uuid
+  expiresAt      DateTime?
+  createdAt      DateTime     @default(now())
+  completedAt    DateTime?
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  requestedBy  User?        @relation(fields: [requestedById], references: [id])
+
+  @@index([organizationId, type, status])
+  @@map("reports")
+}
+
+model Notification {
+  id             String              @id @default(uuid()) @db.Uuid
+  organizationId String              @db.Uuid
+  userId         String?             @db.Uuid
+  channel        NotificationChannel @default(IN_APP)
+  status         NotificationStatus  @default(PENDING)
+  title          String
+  body           String?
+  /// Deep-link context: { caseId, visitId, fraudEventId, ... }
+  data           Json                @default("{}")
+  readAt         DateTime?
+  createdAt      DateTime            @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user         User?        @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId, userId, status])
+  @@map("notifications")
+}
+
+/// Immutable, append-only audit trail. Partitioned monthly by `createdAt`.
+/// Each row carries a hash chain (prevHash -> hash) for tamper-evidence.
+model AuditLog {
+  id             String      @id @default(uuid()) @db.Uuid
+  organizationId String      @db.Uuid
+  actorId        String?     @db.Uuid
+  action         AuditAction
+  /// Logical resource type, e.g. "fraud_case", "visit", "report".
+  resourceType   String
+  resourceId     String?
+  ipAddress      String?
+  userAgent      String?
+  /// Before/after diff or action context (PHI-scrubbed).
+  metadata       Json        @default("{}")
+  /// Tamper-evident hash chain.
+  prevHash       String?
+  hash           String?
+  createdAt      DateTime    @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  actor        User?        @relation(fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([organizationId, createdAt])
+  @@index([organizationId, resourceType, resourceId])
+  @@index([actorId])
+  @@map("audit_logs")
+}

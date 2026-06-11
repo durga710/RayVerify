@@ -1,0 +1,77 @@
+################################################################################
+# environments/prod.tfvars.example
+#
+# Production environment sizing:
+#   - 3 AZs, Multi-AZ RDS, read replica, Redis cluster with replica
+#   - Large ECS task counts with aggressive autoscaling limits
+#   - Deletion protection ON for RDS
+#   - HIPAA-compliant 7-year (2555-day) Object Lock retention
+#   - Strict WAF rate limit
+#
+# Copy to prod.tfvars and fill in real values before use.
+# NEVER commit prod.tfvars to source control (contains real domain / zone IDs).
+################################################################################
+
+# Core
+aws_region  = "us-east-1"
+environment = "prod"
+az_count    = 3
+
+# DNS
+domain_name     = "rayverify.example.com"  # Replace with real domain
+api_subdomain   = "api"
+app_subdomain   = "app"
+route53_zone_id = "ZXXXXXXXXXXXXXXXXXXX"   # Replace with real hosted zone ID
+
+# Networking
+vpc_cidr = "10.2.0.0/16"
+
+# RDS — production grade
+# db.r7g.xlarge gives 4 vCPU / 32 GiB RAM for PostgreSQL workloads
+rds_instance_class        = "db.r7g.xlarge"
+rds_allocated_storage     = 500
+rds_max_allocated_storage = 5000
+rds_engine_version        = "16.3"
+rds_backup_retention_days = 35  # 35 days PITR (HIPAA minimum is 7; 35 = 5 weeks)
+rds_deletion_protection   = true  # CRITICAL: prevents accidental database deletion
+rds_multi_az              = true  # Synchronous standby in second AZ
+rds_create_read_replica   = true  # Dedicated analytics replica
+rds_db_name               = "rayverify"
+
+# Redis — 3-node cluster with automatic failover
+redis_node_type          = "cache.r7g.large"
+redis_num_cache_clusters = 3
+redis_engine_version     = "7.1"
+
+# ECS — API service (production baseline: 3 tasks across 3 AZs)
+api_cpu           = 1024  # 1 vCPU
+api_memory        = 2048  # 2 GiB
+api_desired_count = 3
+api_min_count     = 3
+api_max_count     = 20
+api_image_tag     = "prod"
+
+# ECS — Worker service
+worker_cpu           = 1024
+worker_memory        = 2048
+worker_desired_count = 3
+worker_min_count     = 2
+worker_max_count     = 15
+worker_image_tag     = "prod"
+
+# ECS — ML-scoring service (CPU-intensive fraud inference)
+ml_cpu           = 4096  # 4 vCPU
+ml_memory        = 8192  # 8 GiB
+ml_desired_count = 2
+ml_min_count     = 2
+ml_max_count     = 10
+ml_image_tag     = "prod"
+
+# WAF — strict rate limit (government agency traffic is predictable)
+waf_rate_limit = 2000
+
+# Alerts — production on-call distribution list
+alert_email = "oncall@example.com"
+
+# S3 Object Lock — HIPAA requires 6-year minimum; 7 years = 2555 days
+evidence_object_lock_days = 2555

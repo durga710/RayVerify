@@ -1,0 +1,35 @@
+{
+  "name": "rayverify",
+  "version": "0.1.0",
+  "private": true,
+  "description": "RayVerify™ — Government-grade fraud detection & identity verification for Medicaid, HCBS, and personal care programs.",
+  "license": "UNLICENSED",
+  "workspaces": [
+    "packages/*"
+  ],
+  "engines": {
+    "node": ">=20.0.0",
+    "npm": ">=10.0.0"
+  },
+  "scripts": {
+    "dev": "npm run dev --workspaces --if-present",
+    "build": "npm run build --workspaces --if-present",
+    "lint": "npm run lint --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "format": "prettier --write \"**/*.{ts,tsx,js,jsx,json,md,yaml,yml}\"",
+    "format:check": "prettier --check \"**/*.{ts,tsx,js,jsx,json,md,yaml,yml}\"",
+    "db:up": "docker compose up -d postgres redis",
+    "db:migrate": "npm run prisma:migrate --workspace packages/backend",
+    "db:seed": "npm run prisma:seed --workspace packages/backend",
+    "dev:infra": "docker compose up -d"
+  },
+  "overrides": {
+    "@nestjs/common": "11.1.26",
+    "@nestjs/core": "11.1.26",
+    "@nestjs/platform-express": "11.1.26"
+  },
+  "devDependencies": {
+    "prettier": "^3.3.3"
+  }
+}
